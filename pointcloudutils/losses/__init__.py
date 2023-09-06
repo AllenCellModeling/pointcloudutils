@@ -1,2 +1,2 @@
-from .chamfer_loss import ChamferLoss
-from .l1_loss import L1Loss
+from .chamfer_densityaware import DensityAwareChamferLoss
+from .l1 import L1Loss
