@@ -37,7 +37,9 @@ dev_requirements = [
     "wheel>=0.34.2",
 ]
 
-requirements = []
+requirements = [
+    "pydantic==1.10.9",
+ ]
 
 extra_requirements = {
     "setup": setup_requirements,
