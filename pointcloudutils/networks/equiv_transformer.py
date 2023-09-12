@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 from cyto_dl import utils
-from .vnn import VNLinear, VNRotationMatrix
+from cyto_dl.nn.point_cloud.vnn import VNLinear, VNRotationMatrix
 
 log = utils.get_pylogger(__name__)
 

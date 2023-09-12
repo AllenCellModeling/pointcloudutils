@@ -16,6 +16,7 @@ class ShapenetDataModule(LightningDataModule):
         self,
         dataset_folder: str = "/allen/aics/modeling/ritvik/projects/occupancy_networks/data/ShapeNet",
         method: str = "shapenet_dfnet",
+        x_label: str = 'pcloud',
         dataset_type: str = "partial_pointcloud",
         train_split: str = "train",
         val_split: str = "val",
@@ -47,6 +48,7 @@ class ShapenetDataModule(LightningDataModule):
         self.categories = categories
         self.train_split = train_split
         self.val_split = val_split
+        self.x_label = x_label
         self.test_split = test_split
         self.points_subsample = points_subsample
         self.input_type = input_type
@@ -91,7 +93,7 @@ class ShapenetDataModule(LightningDataModule):
         )
 
         if inputs_field is not None:
-            fields["pcloud"] = inputs_field
+            fields[self.x_label] = inputs_field
 
         if self.return_idx:
             fields["idx"] = IndexField()
@@ -110,6 +112,7 @@ class ShapenetDataModule(LightningDataModule):
             self.splits[mode],
             self.categories,
             transform,
+            self.x_label,
         )
         return dataset
 
