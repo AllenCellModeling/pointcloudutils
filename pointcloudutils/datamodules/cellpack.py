@@ -190,6 +190,9 @@ class CellPackDataset(Dataset):
                     if os.path.isfile(structure_path + this_path):
                         nuc_path = ref_path + f"{this_id}_{rot}.obj"
                         nuc_vol = df_orig.loc[df_orig['CellId'] == this_id]['volume_of_nucleus_um3'].item()
+                        nuc_height = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['position_depth'].iloc[0]
+                        nuc_area = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['roundness_surface_area'].iloc[0]
+                        nuc_vol2 = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['shape_volume_lcc'].iloc[0]
                         tup.append(
                             [
                                 structure_path + this_path,
@@ -202,7 +205,10 @@ class CellPackDataset(Dataset):
                                 num_points_ref,
                                 num_points,
                                 self.packing_rules.index(rule),
-                                nuc_vol
+                                nuc_vol,
+                                nuc_height,
+                                nuc_area,
+                                nuc_vol2
                             ]
                         )
                         if self.rotation_augmentations:
@@ -219,7 +225,10 @@ class CellPackDataset(Dataset):
                                         num_points_ref,
                                         num_points,
                                         self.packing_rules.index(rule),
-                                        nuc_vol
+                                        nuc_vol,
+                                        nuc_height,
+                                        nuc_area,
+                                        nuc_vol2
                                     ]
                                 )
 
@@ -243,6 +252,9 @@ class CellPackDataset(Dataset):
         self.rot = [i[5] for i in all_packings]
         self.jitter = [i[6] for i in all_packings]
         self.nuc_vol = [i[7] for i in all_packings]
+        self.nuc_height = [i[8] for i in all_packings]
+        self.nuc_area = [i[9] for i in all_packings]
+        self.nuc_vol2 = [i[10] for i in all_packings]
 
         self.len = len(self.data)
         self.label = []
@@ -275,6 +287,9 @@ class CellPackDataset(Dataset):
                 "rotation_aug": torch.tensor(self.rot[item]),
                 "jitter_aug": torch.tensor(self.jitter[item][0]).unsqueeze(dim=0),
                 "nuc_vol": torch.tensor(self.nuc_vol[item]).unsqueeze(dim=0),
+                "nuc_height": torch.tensor(self.nuc_height[item]).unsqueeze(dim=0),
+                "nuc_area": torch.tensor(self.nuc_area[item]).unsqueeze(dim=0),
+                "nuc_vol2": torch.tensor(self.nuc_vol2[item]).unsqueeze(dim=0),
             }
         else:
             return {self.x_label: x, self.ref_label: ref}
@@ -326,6 +341,9 @@ def get_packing(tup):
     num_points = tup[8]
     rule_ind = tup[9]
     nuc_vol = tup[10]
+    nuc_height = tup[11]
+    nuc_area = tup[12]
+    nuc_vol2 = tup[13]
 
     with open(this_path, "r") as f:
         tmp = json.load(f)
@@ -373,7 +391,10 @@ def get_packing(tup):
             this_pack_rot,
             theta,
             jitter_ret,
-            nuc_vol
+            nuc_vol,
+            nuc_height, 
+            nuc_area,
+            nuc_vol2
         )
 
 
