@@ -298,7 +298,7 @@ class Point_M2AE(nn.Module):
         self.rec_head = nn.Conv1d(self.decoder_dims[-1], 3 * self.group_sizes[0], 1)
         self.loss = cd()
 
-    def forward(self, pts, eval=False, **kwargs):
+    def forward(self, pts, eval=False, return_all=False, **kwargs):
         # multi-scale representations of point clouds
         neighborhoods, centers, idxs = [], [], []
         for i in range(len(self.group_dividers)):
@@ -316,6 +316,8 @@ class Point_M2AE(nn.Module):
             x_vis_list, mask_vis_list, _ = self.h_encoder(
                 neighborhoods, centers, idxs, eval=True
             )
+            if return_all:
+                return x_vis_list
             x_vis = x_vis_list[-1]
             return x_vis.mean(1) + x_vis.max(1)[0]
         else:
