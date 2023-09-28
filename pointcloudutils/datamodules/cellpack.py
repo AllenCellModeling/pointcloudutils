@@ -12,6 +12,9 @@ from tqdm import tqdm
 from multiprocessing import Pool
 import pyshtools
 from scipy import interpolate as spinterp
+import torch.nn.functional as F
+from sklearn import preprocessing
+
 
 
 class CellPackDataModule(LightningDataModule):
@@ -36,6 +39,7 @@ class CellPackDataModule(LightningDataModule):
         rotation_augmentations: Optional[int] = None,
         jitter_augmentations: Optional[int] = None,
         max_ids: Optional[int] = None,
+        norm_feats: Optional[bool] = False,
     ):
         """ """
         super().__init__()
@@ -55,6 +59,7 @@ class CellPackDataModule(LightningDataModule):
         self.structure_path = structure_path
         self.ref_path = ref_path
         self.max_ids = max_ids
+        self.norm_feats = norm_feats
 
     def _get_dataset(self, split):
         return CellPackDataset(
@@ -72,6 +77,7 @@ class CellPackDataModule(LightningDataModule):
             self.rotation_augmentations,
             self.jitter_augmentations,
             self.max_ids,
+            self.norm_feats
         )
 
     def train_dataloader(self):
@@ -129,6 +135,7 @@ class CellPackDataset(Dataset):
         rotation_augmentations: Optional[int] = None,
         jitter_augmentations: Optional[int] = None,
         max_ids: Optional[int] = None,
+        norm_feats: Optional[bool] = False,
     ):
         self.x_label = x_label
         self.scale = scale
@@ -142,6 +149,7 @@ class CellPackDataset(Dataset):
         self.jitter_augmentations = jitter_augmentations
         self.num_points_ref = num_points_ref
         self.max_ids = max_ids
+        self.num_rules = len(self.packing_rules)
 
         self.ref_csv = pd.read_csv(ref_path + "manifest.csv")
 
@@ -165,7 +173,6 @@ class CellPackDataset(Dataset):
         }
 
         self.ids = _splits[split]
-
         # self.data = []
         # self.ref = []
         # self.id_list = []
@@ -175,6 +182,15 @@ class CellPackDataset(Dataset):
         # self.jitter = []
         df_orig = pd.read_csv('/allen/aics/assay-dev/computational/data/4DN_handoff_Apr2022_testing/PCNA_manifest_for_suraj_with_brightfield.csv')
 
+        if norm_feats:
+            x = self.ref_csv[['shape_volume_lcc', 'roundness_surface_area', 'position_depth']].values #returns a numpy array
+            min_max_scaler = preprocessing.MinMaxScaler()
+            x_scaled = min_max_scaler.fit_transform(x)
+            self.ref_csv[['shape_volume_lcc', 'roundness_surface_area', 'position_depth']] = pd.DataFrame(x_scaled)
+
+        for feat in ['shape_volume_lcc', 'roundness_surface_area', 'position_depth']:
+            self.ref_csv[f'{feat}_bins'] = pd.cut(self.ref_csv[feat], bins=5)
+            self.ref_csv[f'{feat}_bins'] = pd.factorize(self.ref_csv[f'{feat}_bins'])[0]
 
         tup = []
         for this_id in tqdm(self.ids, total=len(self.ids)):
@@ -189,10 +205,11 @@ class CellPackDataset(Dataset):
                     )
                     if os.path.isfile(structure_path + this_path):
                         nuc_path = ref_path + f"{this_id}_{rot}.obj"
-                        nuc_vol = df_orig.loc[df_orig['CellId'] == this_id]['volume_of_nucleus_um3'].item()
+                        nuc_vol2 = df_orig.loc[df_orig['CellId'] == this_id]['volume_of_nucleus_um3'].item()
                         nuc_height = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['position_depth'].iloc[0]
                         nuc_area = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['roundness_surface_area'].iloc[0]
-                        nuc_vol2 = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['shape_volume_lcc'].iloc[0]
+                        nuc_vol = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['shape_volume_lcc'].iloc[0]
+                        nuc_vol_bin = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['shape_volume_lcc_bins'].iloc[0]
                         tup.append(
                             [
                                 structure_path + this_path,
@@ -208,7 +225,8 @@ class CellPackDataset(Dataset):
                                 nuc_vol,
                                 nuc_height,
                                 nuc_area,
-                                nuc_vol2
+                                nuc_vol2,
+                                nuc_vol_bin
                             ]
                         )
                         if self.rotation_augmentations:
@@ -228,7 +246,8 @@ class CellPackDataset(Dataset):
                                         nuc_vol,
                                         nuc_height,
                                         nuc_area,
-                                        nuc_vol2
+                                        nuc_vol2,
+                                        nuc_vol_bin
                                     ]
                                 )
 
@@ -255,6 +274,7 @@ class CellPackDataset(Dataset):
         self.nuc_height = [i[8] for i in all_packings]
         self.nuc_area = [i[9] for i in all_packings]
         self.nuc_vol2 = [i[10] for i in all_packings]
+        self.nuc_vol_bins = [i[11] for i in all_packings]
 
         self.len = len(self.data)
         self.label = []
@@ -286,10 +306,12 @@ class CellPackDataset(Dataset):
                 "packing_rotation": torch.tensor(self.pack_rot[item]).unsqueeze(dim=0),
                 "rotation_aug": torch.tensor(self.rot[item]),
                 "jitter_aug": torch.tensor(self.jitter[item][0]).unsqueeze(dim=0),
-                "nuc_vol": torch.tensor(self.nuc_vol[item]).unsqueeze(dim=0),
-                "nuc_height": torch.tensor(self.nuc_height[item]).unsqueeze(dim=0),
-                "nuc_area": torch.tensor(self.nuc_area[item]).unsqueeze(dim=0),
-                "nuc_vol2": torch.tensor(self.nuc_vol2[item]).unsqueeze(dim=0),
+                "nuc_vol": torch.tensor(self.nuc_vol[item]).unsqueeze(dim=0).float(),
+                "nuc_height": torch.tensor(self.nuc_height[item]).unsqueeze(dim=0).float(),
+                "nuc_area": torch.tensor(self.nuc_area[item]).unsqueeze(dim=0).float(),
+                "nuc_vol2": torch.tensor(self.nuc_vol2[item]).unsqueeze(dim=0).float(),
+                "nuc_vol_bin": torch.tensor(self.nuc_vol_bins[item]).unsqueeze(dim=0).long(),
+                "rule_one_hot": F.one_hot(torch.tensor(self.rule[item]).unsqueeze(dim=0), self.num_rules).squeeze(),
             }
         else:
             return {self.x_label: x, self.ref_label: ref}
@@ -344,6 +366,7 @@ def get_packing(tup):
     nuc_height = tup[11]
     nuc_area = tup[12]
     nuc_vol2 = tup[13]
+    nuc_vol_bins = tup[14]
 
     with open(this_path, "r") as f:
         tmp = json.load(f)
@@ -394,7 +417,8 @@ def get_packing(tup):
             nuc_vol,
             nuc_height, 
             nuc_area,
-            nuc_vol2
+            nuc_vol2,
+            nuc_vol_bins,
         )
 
 
