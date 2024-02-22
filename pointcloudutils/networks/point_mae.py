@@ -483,10 +483,13 @@ class Point_MAE(nn.Module):
 
         trunc_normal_(self.mask_token, std=0.02)
 
-    def forward(self, pts, vis=False, **kwargs):
+    def forward(self, pts, eval=False, vis=False, **kwargs):
         neighborhood, center = self.group_divider(pts)
 
         x_vis, mask = self.MAE_encoder(neighborhood, center)
+
+        if eval:
+            return x_vis.mean(1) + x_vis.max(1)[0]
         B, _, C = x_vis.shape  # B VIS C
 
         pos_emd_vis = self.decoder_pos_embed(center[~mask]).reshape(B, -1, C)
