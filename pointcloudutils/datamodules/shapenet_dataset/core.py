@@ -139,6 +139,8 @@ class Shapes3dDataset(data.Dataset):
         if self.transform is not None:
             data = self.transforms(data, transform_type=self.transform)
 
+        data["cell_id"] = model
+
         return data
 
     def transforms(self, data, transform_type=None):
