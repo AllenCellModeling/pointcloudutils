@@ -64,7 +64,6 @@ class ShapenetDataModule(LightningDataModule):
         self.train_rotate = train_rotate
         self.train_translate = train_translate
         self.train_single_trans = train_single_trans
-        self.categories = categories
         self.loader_fnc = DataLoader
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -125,7 +124,6 @@ class ShapenetDataModule(LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
             shuffle=False,
-            multiprocessing_context="fork",
         )
         return dataloader
 
@@ -138,7 +136,6 @@ class ShapenetDataModule(LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
             shuffle=False,
-            multiprocessing_context="fork",
         )
         return dataloader
 
@@ -151,6 +148,5 @@ class ShapenetDataModule(LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
             shuffle=False,
-            multiprocessing_context="fork",
         )
         return dataloader
