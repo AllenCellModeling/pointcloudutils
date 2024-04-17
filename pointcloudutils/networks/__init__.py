@@ -8,3 +8,4 @@ from .simple_inner import DecoderInner
 # from .vq_vae import VQVAE
 # from .vq_vae_pl import VQVAE
 # from .vq_vae_cdl import VQVAE
+from .latent_local_decoder import LatentLocalDecoder
