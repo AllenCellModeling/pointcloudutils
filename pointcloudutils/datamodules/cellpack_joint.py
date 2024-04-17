@@ -14,11 +14,10 @@ import pyshtools
 from scipy import interpolate as spinterp
 import torch.nn.functional as F
 from sklearn import preprocessing
-from hydra.utils import instantiate
-import yaml
 
 
-class CellPackDataModule(LightningDataModule):
+
+class CellPackDataModuleJoint(LightningDataModule):
     def __init__(
         self,
         batch_size: int,
@@ -41,17 +40,11 @@ class CellPackDataModule(LightningDataModule):
         jitter_augmentations: Optional[int] = None,
         max_ids: Optional[int] = None,
         norm_feats: Optional[bool] = False,
-        num_rotations: Optional[int] = 3,
-        include_real_data: Optional[bool] = False,
-        upsample: Optional[bool] = False,
-        image: Optional[bool] = False,
     ):
         """ """
         super().__init__()
         self.batch_size = batch_size
-        self.include_real_data = include_real_data
         self.num_workers = num_workers
-        self.upsample = upsample
         self.loader_fnc = DataLoader
         self.num_points = num_points
         self.return_id = return_id
@@ -67,8 +60,6 @@ class CellPackDataModule(LightningDataModule):
         self.ref_path = ref_path
         self.max_ids = max_ids
         self.norm_feats = norm_feats
-        self.num_rotations = num_rotations
-        self.image = image
 
     def _get_dataset(self, split):
         return CellPackDataset(
@@ -86,11 +77,7 @@ class CellPackDataModule(LightningDataModule):
             self.rotation_augmentations,
             self.jitter_augmentations,
             self.max_ids,
-            self.norm_feats,
-            self.num_rotations,
-            self.include_real_data,
-            self.upsample,
-            self.image
+            self.norm_feats
         )
 
     def train_dataloader(self):
@@ -149,19 +136,13 @@ class CellPackDataset(Dataset):
         jitter_augmentations: Optional[int] = None,
         max_ids: Optional[int] = None,
         norm_feats: Optional[bool] = False,
-        num_rotations: Optional[int] = 3,
-        include_real_data: Optional[bool] = False,
-        upsample: Optional[bool] = False,
-        image: Optional[bool] = False,
     ):
         self.x_label = x_label
         self.scale = scale
         self.ref_label = ref_label
-        self.upsample = upsample
         self.num_points = num_points
         self.packing_rotations = packing_rotations
         self.packing_rules = packing_rules
-        self.include_real_data = include_real_data
         self.structure_path = structure_path
         self.ref_path = ref_path
         self.rotation_augmentations = rotation_augmentations
@@ -169,8 +150,6 @@ class CellPackDataset(Dataset):
         self.num_points_ref = num_points_ref
         self.max_ids = max_ids
         self.num_rules = len(self.packing_rules)
-        self.num_rotations = num_rotations
-        self.image = image
 
         self.ref_csv = pd.read_csv(ref_path + "manifest.csv")
 
@@ -194,10 +173,6 @@ class CellPackDataset(Dataset):
         }
 
         self.ids = _splits[split]
-
-        if split == 'test':
-            self.ids = ['9c1ff213-4e9e-4b73-a942-3baf9d37a50f']
-
         # self.data = []
         # self.ref = []
         # self.id_list = []
@@ -205,33 +180,24 @@ class CellPackDataset(Dataset):
         # self.pack_rot = []
         # self.rot = []
         # self.jitter = []
-        df_orig = pd.read_csv(
-            "/allen/aics/assay-dev/computational/data/4DN_handoff_Apr2022_testing/PCNA_manifest_for_suraj_with_brightfield.csv"
-        )
+        df_orig = pd.read_csv('/allen/aics/assay-dev/computational/data/4DN_handoff_Apr2022_testing/PCNA_manifest_for_suraj_with_brightfield.csv')
 
         if norm_feats:
-            x = self.ref_csv[
-                ["volume_of_nucleus_um3", "roundness_surface_area", "position_depth"]
-            ].values  # returns a numpy array
+            x = self.ref_csv[['shape_volume_lcc', 'roundness_surface_area', 'position_depth']].values #returns a numpy array
             min_max_scaler = preprocessing.MinMaxScaler()
             x_scaled = min_max_scaler.fit_transform(x)
-            self.ref_csv[
-                ["volume_of_nucleus_um3", "roundness_surface_area", "position_depth"]
-            ] = pd.DataFrame(x_scaled)
+            self.ref_csv[['shape_volume_lcc', 'roundness_surface_area', 'position_depth']] = pd.DataFrame(x_scaled)
 
-        for feat in ["shape_volume_lcc", "roundness_surface_area", "position_depth"]:
-            self.ref_csv[f"{feat}_bins"] = pd.cut(self.ref_csv[feat], bins=5)
-            self.ref_csv[f"{feat}_bins"] = pd.factorize(self.ref_csv[f"{feat}_bins"])[0]
+        for feat in ['shape_volume_lcc', 'roundness_surface_area', 'position_depth']:
+            self.ref_csv[f'{feat}_bins'] = pd.cut(self.ref_csv[feat], bins=5)
+            self.ref_csv[f'{feat}_bins'] = pd.factorize(self.ref_csv[f'{feat}_bins'])[0]
 
         tup = []
-        # self.num_rotations = 3
+        npm1_path = '/allen/aics/modeling/ritvik/forSaurabh/npm1/'
         for this_id in tqdm(self.ids, total=len(self.ids)):
             for rule in packing_rules:
-                for rot in packing_rotations:
-                    for rot_ind in range(self.num_rotations):
-                        rotation_bool = True
-                        if rot_ind == 0:
-                            rotation_bool = False
+                for clusters in [1, 2, 3]:
+                    for rot in packing_rotations:
                         this_path = (
                             "positions_pcna_analyze_"
                             + f"{rule}"
@@ -239,25 +205,24 @@ class CellPackDataset(Dataset):
                             + f"_{rot}"
                             + ".json"
                         )
+                        this_npm1_path = (
+                            "voxelized_image_npm1_analyze_"
+                            + f"{clusters}_clust_random_"
+                            + f"{this_id}"
+                            + f"_seed_0"
+                            + ".ply"
+                        )
                         if os.path.isfile(structure_path + this_path):
                             nuc_path = ref_path + f"{this_id}_{rot}.obj"
-                            nuc_vol = df_orig.loc[df_orig["CellId"] == this_id][
-                                "volume_of_nucleus_um3"
-                            ].item()
-                            nuc_vol2 = nuc_vol
-                            nuc_height = self.ref_csv.loc[
-                                self.ref_csv["CellId"] == this_id
-                            ]["position_depth"].iloc[0]
-                            nuc_area = self.ref_csv.loc[
-                                self.ref_csv["CellId"] == this_id
-                            ]["roundness_surface_area"].iloc[0]
-                            nuc_vol_bin = self.ref_csv.loc[
-                                self.ref_csv["CellId"] == this_id
-                            ]["shape_volume_lcc_bins"].iloc[0]
+                            nuc_vol2 = df_orig.loc[df_orig['CellId'] == this_id]['volume_of_nucleus_um3'].item()
+                            nuc_height = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['position_depth'].iloc[0]
+                            nuc_area = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['roundness_surface_area'].iloc[0]
+                            nuc_vol = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['shape_volume_lcc'].iloc[0]
+                            nuc_vol_bin = self.ref_csv.loc[self.ref_csv['CellId'] == this_id]['shape_volume_lcc_bins'].iloc[0]
                             tup.append(
                                 [
                                     structure_path + this_path,
-                                    rotation_bool,
+                                    False,
                                     False,
                                     self._all_ids.index(this_id),
                                     rule,
@@ -271,8 +236,8 @@ class CellPackDataset(Dataset):
                                     nuc_area,
                                     nuc_vol2,
                                     nuc_vol_bin,
-                                    this_id,
-                                    self.image,
+                                    npm1_path + this_npm1_path,
+                                    clusters,
                                 ]
                             )
                             if self.rotation_augmentations:
@@ -294,37 +259,12 @@ class CellPackDataset(Dataset):
                                             nuc_area,
                                             nuc_vol2,
                                             nuc_vol_bin,
-                                            this_id,
-                                            self.image
-                                        ]
-                                    )
-                            if self.jitter_augmentations:
-                                for i in range(self.jitter_augmentations):
-                                    tup.append(
-                                        [
-                                            structure_path + this_path,
-                                            False,
-                                            True,
-                                            self._all_ids.index(this_id),
-                                            rule,
-                                            self.packing_rotations.index(rot),
-                                            nuc_path,
-                                            num_points_ref,
-                                            num_points,
-                                            self.packing_rules.index(rule),
-                                            nuc_vol,
-                                            nuc_height,
-                                            nuc_area,
-                                            nuc_vol2,
-                                            nuc_vol_bin,
-                                            this_id,
-                                            self.image
+                                            npm1_path + this_npm1_path,
+                                            clusters
                                         ]
                                     )
 
-        # all_packings = []
-        # for i in tqdm(tup, total=len(tup)):
-        #     all_packings.append(get_packing(i))
+        # get_packing(tup[0])
         with Pool(3) as p:
             all_packings = tuple(
                 tqdm(
@@ -348,79 +288,11 @@ class CellPackDataset(Dataset):
         self.nuc_area = [i[9] for i in all_packings]
         self.nuc_vol2 = [i[10] for i in all_packings]
         self.nuc_vol_bins = [i[11] for i in all_packings]
-        self.ids = [i[12] for i in all_packings]
-
-        # reorder
-        tmp_list = []
-        for i, j in zip(self.id_list, self.rule):
-            tmp_list.append(str(i) + '_' + str(j))
-        inds = np.argsort(tmp_list)
-
-        self.data = [self.data[i] for i in inds]
-        self.ref = [self.ref[i] for i in inds]
-        self.id_list = [self.id_list[i] for i in inds]
-        self.rule = [self.rule[i] for i in inds]
-        self.pack_rot = [self.pack_rot[i] for i in inds]
-        self.rot = [self.rot[i] for i in inds]
-        self.jitter = [self.jitter[i] for i in inds]
-        self.nuc_vol = [self.nuc_vol[i] for i in inds]
-        self.nuc_height = [self.nuc_height[i] for i in inds]
-        self.nuc_area = [self.nuc_area[i] for i in inds]
-        self.nuc_vol2 = [self.nuc_vol2[i] for i in inds]
-        self.nuc_vol_bins = [self.nuc_vol_bins[i] for i in inds]
-        self.ids = [self.ids[i] for i in inds]
+        self.npm1_data = [i[12] for i in all_packings]
+        self.clusters = [i[13] for i in all_packings]
 
         self.len = len(self.data)
         self.label = []
-        if self.include_real_data:
-            cfg_path = "/allen/aics/modeling/ritvik/projects/cytodl-internal-configs/data/pcna/nuc_bound/pcna_subsample.yaml"
-            with open(cfg_path, "r") as stream:
-                config = yaml.safe_load(stream)
-            data = instantiate(config)
-            all_data_inputs = []
-            all_data_shcoeff = []
-            all_cell_cycle = []
-            all_id = []
-            all_splits = []
-
-            if split == "train":
-                for i in tqdm(data.train_dataloader()):
-                    all_data_inputs.append(i["pcloud"])
-                    all_cell_cycle.append(i["cell_cycle"])
-                    all_data_shcoeff.append(i["shcoeff"])
-                    all_id.append(i["cell_id"])
-                    all_splits.append(i["pcloud"].shape[0] * ["train"])
-            elif split == "val":
-                for i in tqdm(data.val_dataloader()):
-                    all_data_inputs.append(i["pcloud"])
-                    all_cell_cycle.append(i["cell_cycle"])
-                    all_data_shcoeff.append(i["shcoeff"])
-                    all_id.append(i["cell_id"])
-                    all_splits.append(i["pcloud"].shape[0] * ["val"])
-            else:
-                for i in tqdm(data.test_dataloader()):
-                    all_data_inputs.append(i["pcloud"])
-                    all_cell_cycle.append(i["cell_cycle"])
-                    all_data_shcoeff.append(i["shcoeff"])
-                    all_id.append(i["cell_id"])
-                    all_splits.append(i["pcloud"].shape[0] * ["test"])
-
-            all_data_inputs = [item for sublist in all_data_inputs for item in sublist]
-            all_cell_cycle = [item for sublist in all_cell_cycle for item in sublist]
-            all_id = [item for sublist in all_id for item in sublist]
-            all_splits = [item for sublist in all_splits for item in sublist]
-            all_data_shcoeff = [
-                item for sublist in all_data_shcoeff for item in sublist
-            ]
-            all_cell_cycle = [i.item() + 6 for i in all_cell_cycle]
-            all_data_inputs = [i.numpy() for i in all_data_inputs]
-            all_data_shcoeff = [i.numpy() for i in all_data_shcoeff]
-
-            self.data = self.data + all_data_inputs
-            self.ref = self.ref + all_data_shcoeff
-            self.rule = self.rule + all_cell_cycle
-            self.ids = self.ids + all_id
-            self.len = len(self.data)
 
     def __len__(self):
         return self.len
@@ -436,63 +308,29 @@ class CellPackDataset(Dataset):
     def __getitem__(self, item):
         x = self.data[item]
         # x = self.pc_norm(x)
-        x = torch.from_numpy(x.astype(np.float32)).float() * self.scale
-
-        if self.upsample:
-            all_x = []
-            for i in range(8):
-                all_x.append(jitter_pointcloud(x, sigma=0.01, clip=0.02))
-            x = np.concatenate(all_x, axis=0).astype(np.float32)
-
+        x = torch.from_numpy(x).float() * self.scale
+        x2 = torch.from_numpy(self.npm1_data[item]).float() * self.scale
         ref = self.ref[item] * self.scale
         # ref = self.pc_norm(ref)
         ref = torch.from_numpy(ref).float()
-
-        unique_id = str(self.ids[item]) + "_" + str(self.rule[item])
-
         if self.return_id:
-            if not self.include_real_data:
-                return {
-                    self.x_label: x,
-                    self.ref_label: ref,
-                    "orig_CellId_int": torch.tensor(self.id_list[item]).unsqueeze(
-                        dim=0
-                    ),
-                    "orig_CellId": self.ids[item],
-                    "rule": torch.tensor(self.rule[item]).unsqueeze(dim=0),
-                    "cell_id": unique_id,
-                    "packing_rotation": torch.tensor(self.pack_rot[item])
-                    .unsqueeze(dim=0)
-                    .float(),
-                    "rotation_aug": torch.tensor(self.rot[item]),
-                    "jitter_aug": torch.tensor(self.jitter[item][0]).unsqueeze(dim=0),
-                    "nuc_vol": torch.tensor(self.nuc_vol[item])
-                    .unsqueeze(dim=0)
-                    .float(),
-                    "nuc_height": torch.tensor(self.nuc_height[item])
-                    .unsqueeze(dim=0)
-                    .float(),
-                    "nuc_area": torch.tensor(self.nuc_area[item])
-                    .unsqueeze(dim=0)
-                    .float(),
-                    "nuc_vol2": torch.tensor(self.nuc_vol2[item])
-                    .unsqueeze(dim=0)
-                    .float(),
-                    "nuc_vol_bin": torch.tensor(self.nuc_vol_bins[item])
-                    .unsqueeze(dim=0)
-                    .long(),
-                    "rule_one_hot": F.one_hot(
-                        torch.tensor(self.rule[item]).unsqueeze(dim=0), self.num_rules
-                    ).squeeze(),
-                    "structure": torch.tensor([0]).unsqueeze(dim=0).float(),
-                }
-            else:
-                return {
-                    self.x_label: x,
-                    self.ref_label: ref,
-                    "CellId": self.ids[item],
-                    "rule_cell_cycle": torch.tensor(self.rule[item]).unsqueeze(dim=0),
-                }
+            return {
+                self.x_label: x,
+                self.ref_label: ref,
+                'npm1_pcloud': x2,
+                'clusters': torch.tensor(self.clusters[item]).unsqueeze(dim=0),
+                "CellId": torch.tensor(self.id_list[item]).unsqueeze(dim=0),
+                "rule": torch.tensor(self.rule[item]).unsqueeze(dim=0),
+                "packing_rotation": torch.tensor(self.pack_rot[item]).unsqueeze(dim=0).float(),
+                "rotation_aug": torch.tensor(self.rot[item]),
+                "jitter_aug": torch.tensor(self.jitter[item][0]).unsqueeze(dim=0),
+                "nuc_vol": torch.tensor(self.nuc_vol[item]).unsqueeze(dim=0).float(),
+                "nuc_height": torch.tensor(self.nuc_height[item]).unsqueeze(dim=0).float(),
+                "nuc_area": torch.tensor(self.nuc_area[item]).unsqueeze(dim=0).float(),
+                "nuc_vol2": torch.tensor(self.nuc_vol2[item]).unsqueeze(dim=0).float(),
+                "nuc_vol_bin": torch.tensor(self.nuc_vol_bins[item]).unsqueeze(dim=0).long(),
+                "rule_one_hot": F.one_hot(torch.tensor(self.rule[item]).unsqueeze(dim=0), self.num_rules).squeeze(),
+            }
         else:
             return {self.x_label: x, self.ref_label: ref}
 
@@ -530,9 +368,6 @@ def _subsample(points_dna, num_points_ref):
     points_dna = points_dna.sample(n=num_points_ref)
     return points_dna
 
-from skimage.io import imread
-import torchio
-from skimage.measure import block_reduce
 
 def get_packing(tup):
     this_path = tup[0]
@@ -550,22 +385,23 @@ def get_packing(tup):
     nuc_area = tup[12]
     nuc_vol2 = tup[13]
     nuc_vol_bins = tup[14]
-    this_id = tup[15]
-    get_image = tup[16]
-
-    assert this_rule in this_path                                                            
+    npm1_path = tup[15]
+    clusters = tup[16]
 
     with open(this_path, "r") as f:
-
         tmp = json.load(f)
         points = pd.DataFrame()
         points["x"] = [i[0] for i in tmp["0"]["nucleus_interior_pcna"]]
         points["y"] = [i[1] for i in tmp["0"]["nucleus_interior_pcna"]]
         points["z"] = [i[2] for i in tmp["0"]["nucleus_interior_pcna"]]
 
-
         my_point_cloud = PyntCloud.from_file(nuc_path)
         points_dna = my_point_cloud.points
+
+        my_point_cloud2 = PyntCloud.from_file(npm1_path)
+        points_npm1 = my_point_cloud2.points
+        if points_npm1.shape[0] > num_points:
+            points_npm1 = _subsample(points_npm1, num_points)
 
         nuc_she = get_shcoeffs(points_dna.values).values.astype(np.float32).flatten()
 
@@ -582,33 +418,21 @@ def get_packing(tup):
                 theta,
             ) = rotate_pointcloud(points_dna.values, return_rot=True)
             points = rotate_pointcloud(points.values, rotation_matrix, return_rot=False)
+            points_npm1 = rotate_pointcloud(points_npm1.values, rotation_matrix, return_rot=False)
             theta = np.array([theta])
         else:
             theta = np.array([0])
             points = points.values
+            points_npm1 = points_npm1.values
             points_dna = points_dna.values
 
         if jitter:
             points = jitter_pointcloud(points)
             points_dna = jitter_pointcloud(points_dna)
+            points_npm1 = jitter_pointcloud(points_npm1)
             jitter_ret = np.array([1])
         else:
             jitter_ret = np.array([0])
-
-        # for image models
-        if get_image:
-            this_path = this_path.replace('/allen/aics/animated-cell/Saurabh/cellpack/out/pcna/spheresSST/', 
-                            '/allen/aics/animated-cell/Saurabh/cellpack/out/pcna/spheresSST/figures/')
-            this_path = this_path.replace('positions', 'voxelized_image').split('.')[0]    
-            this_path = this_path + '_seed_0.ome.tiff'  
-            tmp = imread(this_path)
-            points = tmp[:,1,:,:]
-            points = np.pad(points, ((0,0), (0,0), (117, 117)))
-            points = block_reduce(points, block_size=4)
-
-            # points = (points - points.min())/(points.max() - points.min())
-            points = (points - points.mean())/points.std()
-            points = np.expand_dims(points, axis=0)
 
         return (
             points,
@@ -619,11 +443,12 @@ def get_packing(tup):
             theta,
             jitter_ret,
             nuc_vol,
-            nuc_height,
+            nuc_height, 
             nuc_area,
             nuc_vol2,
             nuc_vol_bins,
-            this_id,
+            points_npm1,
+            clusters - 1,
         )
 
 

@@ -298,7 +298,33 @@ class Point_M2AE(nn.Module):
         self.rec_head = nn.Conv1d(self.decoder_dims[-1], 3 * self.group_sizes[0], 1)
         self.loss = cd()
 
-    def reconstruct(self, centers, neighborhoods, x_vis_list, masks, mask_vis_list):
+    def forward(self, pts, eval=False, return_all=False, **kwargs):
+        # multi-scale representations of point clouds
+        neighborhoods, centers, idxs = [], [], []
+        for i in range(len(self.group_dividers)):
+            if i == 0:
+                neighborhood, center, idx = self.group_dividers[i](pts)
+            else:
+                neighborhood, center, idx = self.group_dividers[i](center)
+            neighborhoods.append(neighborhood)
+            centers.append(center)
+            idxs.append(idx)  # neighbor indices
+
+        # hierarchical encoder
+        if eval:
+            # for linear svm
+            x_vis_list, mask_vis_list, _ = self.h_encoder(
+                neighborhoods, centers, idxs, eval=True
+            )
+            if return_all:
+                return x_vis_list
+            x_vis = x_vis_list[-1]
+            return x_vis.mean(1) + x_vis.max(1)[0]
+        else:
+            x_vis_list, mask_vis_list, masks = self.h_encoder(
+                neighborhoods, centers, idxs
+            )
+
         # hierarchical decoder
         centers.reverse()
         neighborhoods.reverse()
@@ -353,44 +379,7 @@ class Point_M2AE(nn.Module):
         x_rec = x_full[masks[-2]].reshape(-1, C)
         L, _ = x_rec.shape
 
-        # try:
         rec_points = self.rec_head(x_rec.unsqueeze(-1)).reshape(L, -1, 3)
         gt_points = neighborhoods[-2][masks[-2]].reshape(L, -1, 3)
-        # except:
-        #     import ipdb
-        #     ipdb.set_trace()
-        return rec_points, gt_points
-
-    def forward(self, pts, eval=False, return_all=False, eval_override=False, **kwargs):
-        # multi-scale representations of point clouds
-        neighborhoods, centers, idxs = [], [], []
-        for i in range(len(self.group_dividers)):
-            if i == 0:
-                neighborhood, center, idx = self.group_dividers[i](pts)
-            else:
-                neighborhood, center, idx = self.group_dividers[i](center)
-            neighborhoods.append(neighborhood)
-            centers.append(center)
-            idxs.append(idx)  # neighbor indices
-
-        # hierarchical encoder
-        if eval:
-            # for linear svm
-            if eval_override:
-                eval = False
-            x_vis_list, mask_vis_list, masks = self.h_encoder(
-                neighborhoods, centers, idxs, eval=eval
-            )
-            if return_all:
-                return x_vis_list, mask_vis_list, masks, centers, neighborhoods
-            x_vis = x_vis_list[-2]
-            return x_vis.mean(1) + x_vis.max(1)[0]
-        else:
-            x_vis_list, mask_vis_list, masks = self.h_encoder(
-                neighborhoods, centers, idxs
-            )
-
-        rec_points, gt_points = self.reconstruct(
-            centers, neighborhoods, x_vis_list, masks, mask_vis_list)
 
         return rec_points, gt_points
